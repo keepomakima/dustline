@@ -16,6 +16,11 @@ const BURST = 3;
 const BURST_GAP = 0.11;
 const BURST_PAUSE = 0.9;
 export const CALLSIGNS = ['VEX', 'ORIN', 'KESTREL', 'BRAM'];
+// Team plan: VEX and ORIN follow the player; KESTREL holds Site A and BRAM
+// holds Site B, patrolling between the site's two waypoint nodes, so both
+// sites are covered every round instead of the whole squad clumping behind
+// the player. When the bomb is planted, every mate converges to defend it.
+const HOLD_NODES = { A: [10, 12], B: [15, 16] };
 const CALLOUTS = [
   'Contact!', 'WARDEN spotted!', 'Engaging!', 'Taking fire — need help!',
 ];
@@ -49,6 +54,7 @@ export function createTeammates(scene, colliders, random) {
     const mate = {
       id: i + 1, name: CALLSIGNS[i], group, torso, head, legL, legR,
       body, move, hp: 100, alive: true, state: 'follow',
+      role: i < 2 ? 'follow' : 'hold', holdSite: i === 2 ? 'A' : i === 3 ? 'B' : null, holdNode: 0,
       path: [], pathIndex: 0, target: null, loseTimer: 0,
       burstLeft: 0, burstTimer: 0, pauseTimer: 0.4 + random() * 0.6,
       strafeDir: random() > 0.5 ? 1 : -1, strafeTimer: 0,
@@ -109,6 +115,34 @@ export function createTeammates(scene, colliders, random) {
       const toward = dist > 14 ? 0.8 : dist < 6 ? -0.5 : 0;
       target = { x: pos.x + px + (dx / dist) * toward, z: pos.z + pz + (dz / dist) * toward };
       mate.body.yaw = Math.atan2(-dx, -dz);
+    } else if (ctx.bombPlanted && ctx.bombPos) {
+      // Bomb down: converge on the planted site and defend it — a plant the
+      // squad ignores is a round handed to the defusers.
+      const d = Math.hypot(ctx.bombPos.x - pos.x, ctx.bombPos.z - pos.z);
+      if (d > 4) {
+        if (!mate.path.length || mate.pathIndex >= mate.path.length) setPath(mate, ctx.bombPos);
+        target = mate.path[mate.pathIndex] || null;
+        if (target && Math.hypot(target.x - pos.x, target.z - pos.z) < 0.9) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        mate.nodeTimer = (mate.nodeTimer || 0) + dt;
+        if (mate.nodeTimer > 4) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        if (target) mate.body.yaw = Math.atan2(-(target.x - pos.x), -(target.z - pos.z));
+      } else {
+        mate.body.yaw += dt * 0.6; // hold the site, scanning
+      }
+    } else if (mate.role === 'hold' && mate.holdSite) {
+      // Hold the assigned site: patrol between its two waypoint nodes.
+      const nodes = HOLD_NODES[mate.holdSite];
+      const wp = WAYPOINTS[nodes[mate.holdNode % nodes.length]];
+      const d = Math.hypot(wp[0] - pos.x, wp[1] - pos.z);
+      if (d < 1.2) { mate.holdNode += 1; mate.path = []; }
+      else {
+        if (!mate.path.length || mate.pathIndex >= mate.path.length) setPath(mate, { x: wp[0], z: wp[1] });
+        target = mate.path[mate.pathIndex] || null;
+        if (target && Math.hypot(target.x - pos.x, target.z - pos.z) < 0.9) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        mate.nodeTimer = (mate.nodeTimer || 0) + dt;
+        if (mate.nodeTimer > 4) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        if (target) mate.body.yaw = Math.atan2(-(target.x - pos.x), -(target.z - pos.z));
+      }
     } else if (mate.state === 'follow' && ctx.playerAlive) {
       // Hold a loose formation ~4 m behind the player; drift to a nearby waypoint.
       const pp = ctx.playerPos;
@@ -160,8 +194,8 @@ export function createTeammates(scene, colliders, random) {
         if (mate.burstTimer <= 0) {
           mate.burstLeft -= 1; mate.burstTimer = BURST_GAP;
           ctx.onMateShot(mate);
-          const chance = Math.max(0.1, Math.min(0.6, 0.55 - seen.dist * 0.008));
-          if (random() < chance) ctx.onDamageEnemy(mate.target, 10 + random() * 8, mate);
+          const chance = Math.max(0.12, Math.min(0.65, 0.62 - seen.dist * 0.008));
+          if (random() < chance) ctx.onDamageEnemy(mate.target, 12 + random() * 8, mate);
         }
       } else if (mate.pauseTimer <= 0) {
         mate.burstLeft = BURST; mate.burstTimer = 0; mate.pauseTimer = BURST_PAUSE + random() * 0.5;
@@ -190,7 +224,7 @@ export function createTeammates(scene, colliders, random) {
       for (let i = 0; i < mates.length; i += 1) {
         const m = mates[i]; const s = spawns[i];
         m.body.position.set(s.x, 0, s.z); m.body.velocity.set(0, 0, 0);
-        m.hp = 100; m.alive = true; m.state = 'follow';
+        m.hp = 100; m.alive = true; m.state = 'follow'; m.holdNode = 0;
         m.path = []; m.target = null; m.burstLeft = 0;
         m.group.rotation.set(0, 0, 0); m.group.position.set(s.x, 0, s.z);
       }

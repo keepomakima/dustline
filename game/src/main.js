@@ -181,6 +181,7 @@ function startLivePhase() {
   audio.round();
   hud.banner(`Round ${game.round} — plant the bomb or clear the yard`);
   hud.feed('VEX: "Moving out. Watch the mid door."');
+  hud.feed('KESTREL holding Site A — BRAM holding Site B.');
 }
 
 function endRound(winner, reason) {
@@ -438,6 +439,7 @@ function step(dt) {
     mates.step(dt, {
       enemies: bots.bots,
       playerPos: body.position, playerYaw: body.yaw, playerAlive: game.playerAlive,
+      bombPlanted: bomb.state.planted, bombPos: bomb.state.pos,
       onMateShot: (mate) => { audio.enemyShot(); bots.hear(mate.body.position.x, mate.body.position.z); },
       onDamageEnemy: (enemy, dmg, mate) => {
         const result = bots.damage(enemy.torso, dmg);

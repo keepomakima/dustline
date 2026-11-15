@@ -43,7 +43,7 @@ export function createBots(scene, colliders, random) {
       body, move, hp: 100, alive: true, state: 'patrol',
       waypoint: Math.floor(random() * WAYPOINTS.length),
       path: [], pathIndex: 0, target: null, lastKnown: null, loseTimer: 0,
-      burstLeft: 0, burstTimer: 0, pauseTimer: 0.4 + random() * 0.6,
+      burstLeft: 0, burstTimer: 0, pauseTimer: 0.4 + random() * 0.6, aimTimer: 0,
       strafeDir: random() > 0.5 ? 1 : -1, strafeTimer: 0,
       stuckTimer: 0, lastPos: new THREE.Vector3(spawn.x, 0, spawn.z),
       defuseProgress: 0, walkPhase: random() * 6, kills: 0, deaths: 0,
@@ -86,6 +86,10 @@ export function createBots(scene, colliders, random) {
     const prevState = bot.state;
     if (seen) {
       bot.state = 'engage'; bot.target = seen.target;
+      // Reaction time: a bot that just spotted a target takes 0.6 s to aim
+      // before its first burst, so a player (or scripted player) crossing a
+      // doorway is not instantly shredded.
+      if (prevState !== 'engage') bot.aimTimer = 0.6;
       bot.lastKnown = { x: seen.target.pos.x, z: seen.target.pos.z }; bot.loseTimer = 0;
     } else if (bot.state === 'engage') {
       bot.loseTimer += dt;
@@ -150,8 +154,10 @@ export function createBots(scene, colliders, random) {
       if (moved < 0.3 && bot.state !== 'engage') { bot.waypoint = Math.floor(random() * WAYPOINTS.length); bot.path = []; }
       bot.lastPos.copy(pos); bot.stuckTimer = 0;
     }
-    // Burst fire while engaging.
+    // Burst fire while engaging (after the reaction delay).
     if (bot.state === 'engage' && dist > 0 && bot.target && bot.target.alive) {
+      if (bot.aimTimer > 0) { bot.aimTimer -= dt; }
+      else {
       bot.pauseTimer -= dt;
       if (bot.burstLeft > 0) {
         bot.burstTimer -= dt;
@@ -167,6 +173,7 @@ export function createBots(scene, colliders, random) {
         }
       } else if (bot.pauseTimer <= 0) {
         bot.burstLeft = BURST; bot.burstTimer = 0; bot.pauseTimer = BURST_PAUSE + random() * 0.5;
+      }
       }
     }
     if (prevState !== bot.state) { /* state changes are visible in the probe */ }
