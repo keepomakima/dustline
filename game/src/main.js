@@ -11,6 +11,7 @@ import { createInput } from './input.js';
 import { createPlayer } from './player.js';
 import { createWeapons, WEAPONS, GRENADE } from './weapons.js';
 import { createBots } from './bots.js';
+import { createTeammates } from './teammates.js';
 import { createBomb, PLANT_TIME, FUSE_TIME, DEFUSE_TIME } from './bomb.js';
 import { createHud } from './hud.js';
 import { createAudio } from './audio.js';
@@ -18,8 +19,8 @@ import { createAudio } from './audio.js';
 const FIXED_STEP = 1 / 60;
 const BUY_SECONDS = 15;
 const ROUND_SECONDS = 100;
-const WIN_ROUNDS = 4;
-const MAX_ROUNDS = 7;
+const WIN_ROUNDS = 7;
+const MAX_ROUNDS = 12;
 const params = new URLSearchParams(window.location.search);
 const shot = params.get('shot');
 const testMode = params.get('test') === '1';
@@ -55,11 +56,12 @@ const hud = createHud();
 const player = createPlayer(world.colliders);
 const weapons = createWeapons(camera);
 const bots = createBots(scene, world.colliders, random);
+const mates = createTeammates(scene, world.colliders, random);
 const bomb = createBomb(scene);
 const input = createInput(renderer.domElement, onLockChange);
 const raycaster = new THREE.Raycaster();
 raycaster.far = 90;
-const shootables = world.shootables.concat(bots.hitMeshes);
+const shootables = world.shootables.concat(bots.hitMeshes, mates.hitMeshes);
 const direction = new THREE.Vector3();
 const tmpVec = new THREE.Vector3();
 
@@ -121,10 +123,17 @@ let stepTimer = 0;
 let roundEndTimer = 0;
 let roundWinner = null;
 let shake = 0;
+let spectateMate = null;
 
 try { game.best = Number(localStorage.getItem('dustline-best') ?? 0) || 0; } catch { game.best = 0; }
 
 function syncCamera() {
+  if (!game.playerAlive && spectateMate && spectateMate.alive) {
+    const mp = spectateMate.body.position;
+    camera.position.set(mp.x, mp.y + 1.6, mp.z);
+    camera.rotation.set(-0.05, spectateMate.body.yaw, 0, 'YXZ');
+    return;
+  }
   camera.position.set(body.position.x, body.position.y + body.eye, body.position.z);
   camera.rotation.set(body.pitch, body.yaw, 0, 'YXZ');
   if (shake > 0) {
@@ -139,6 +148,8 @@ function resetRoundPositions() {
   body.velocity.set(0, 0, 0);
   body.yaw = SPAWNS.player.yaw; body.pitch = 0;
   bots.reset();
+  mates.reset();
+  spectateMate = null;
   bomb.reset();
   grenades.forEach((g) => scene.remove(g.mesh));
   grenades.length = 0;
@@ -156,6 +167,7 @@ function startBuyPhase() {
   hud.setAmmo(weapons.state.mag, weapons.state.reserve, weapons.def().name, weapons.state.grenades);
   hud.setRound(game.scoreUs, game.scoreThem, game.round);
   hud.setAlive(bots.aliveCount());
+  hud.setSquad(1 + mates.aliveCount());
   hud.setBomb('Objective: plant at A or B — or eliminate all WARDENs');
   hud.showBuy(game.money, weapons.owned(), weapons.state.grenades, onBuy);
   hud.hideOverlay();
@@ -168,6 +180,7 @@ function startLivePhase() {
   hud.hideOverlay();
   audio.round();
   hud.banner(`Round ${game.round} — plant the bomb or clear the yard`);
+  hud.feed('VEX: "Moving out. Watch the mid door."');
 }
 
 function endRound(winner, reason) {
@@ -264,9 +277,26 @@ function damagePlayer(amount, source) {
   if (game.hp <= 0) {
     game.hp = 0; game.playerAlive = false; game.deaths += 1;
     hud.setHealth(0);
+    hud.setSquad(mates.aliveCount());
     hud.feed(`${source} eliminated you`);
-    if (!bomb.state.planted) endRound('them', 'You were eliminated.');
+    spectateMate = mates.mates.find((m) => m.alive) || null;
+    if (spectateMate) hud.feed(`Spectating ${spectateMate.name} — the squad fights on.`);
+    if (!bomb.state.planted && mates.aliveCount() === 0) endRound('them', 'The squad was eliminated.');
     // If the bomb is planted, the round continues: bots must defuse or it blows.
+    // If squadmates live, they can still clear the yard for the round win.
+  }
+}
+
+function damageMate(mate, amount, source) {
+  if (!mate.alive || game.phase !== 'live') return;
+  const died = mates.damage(mate, amount);
+  hud.setSquad(1 + mates.aliveCount());
+  if (died) {
+    hud.feed(`${source} eliminated ${mate.name}`);
+    if (!game.playerAlive) spectateMate = mates.mates.find((m) => m.alive) || null;
+    if (!game.playerAlive && mates.aliveCount() === 0 && !bomb.state.planted) {
+      endRound('them', 'The squad was eliminated.');
+    }
   }
 }
 
@@ -289,6 +319,11 @@ function shoot(spread) {
     const hit = raycaster.intersectObjects(shootables, false)[0];
     if (!hit) continue;
     spawnTracer(camera.position.clone(), hit.point);
+    if (hit.object.userData.mate) {
+      // Friendly fire is off: the round stops on a squadmate with a puff, no damage.
+      spawnImpact(hit.point);
+      continue;
+    }
     if (hit.object.userData.bot) {
       const bot = hit.object.userData.bot;
       hit.object.userData.lastShooter = { x: body.position.x, z: body.position.z };
@@ -386,13 +421,36 @@ function step(dt) {
 
   // Bots.
   if (live || game.phase === 'roundEnd') {
+    const targets = [
+      { pos: body.position, alive: game.playerAlive, isPlayer: true, ref: null },
+      ...mates.mates.map((m) => ({ pos: m.body.position, alive: m.alive, isPlayer: false, ref: m })),
+    ];
     bots.step(dt, {
-      playerPos: body.position, playerAlive: game.playerAlive,
+      targets, playerAlive: game.playerAlive,
       playerSpeed: player.groundSpeed(),
       bombPlanted: bomb.state.planted, bombPos: bomb.state.pos,
       onDamagePlayer: (dmg, bot) => damagePlayer(dmg, bot.name),
+      onDamageMate: (mate, dmg, bot) => damageMate(mate, dmg, bot.name),
       onBotShot: () => audio.enemyShot(),
       onDefuse: (bot, progress) => bomb.noteDefuse(bot, progress),
+    });
+    mates.step(dt, {
+      enemies: bots.bots,
+      playerPos: body.position, playerYaw: body.yaw, playerAlive: game.playerAlive,
+      onMateShot: (mate) => { audio.enemyShot(); bots.hear(mate.body.position.x, mate.body.position.z); },
+      onDamageEnemy: (enemy, dmg, mate) => {
+        const result = bots.damage(enemy.torso, dmg);
+        if (result && result.killed) {
+          mate.kills += 1;
+          hud.feed(`${mate.name} eliminated ${enemy.name}`);
+          audio.kill();
+          if (bots.aliveCount() === 0 && game.phase === 'live') endRound('us', 'All WARDENs eliminated.');
+        }
+      },
+      onCallout: (mate, text, enemy) => {
+        const site = enemy.body.position.x < 0 ? 'Site A' : 'Site B';
+        hud.feed(`${mate.name}: "${text}" — ${site}`);
+      },
     });
     for (const b of bots.bots) {
       if (!b.alive) continue;
@@ -445,13 +503,14 @@ function step(dt) {
   for (const t of tracers) if (t.life > 0) { t.life -= dt; t.line.material.opacity = Math.max(0, t.life / 0.09) * 0.9; }
   for (const im of impacts) if (im.life > 0) { im.life -= dt; im.mesh.material.opacity = Math.max(0, im.life / 0.25) * 0.9; }
 
-  // Minimap: spotted bots only.
-  hud.drawMinimap(body.position, body.yaw, bots.bots, SITES, bomb.state.pos);
+  // Minimap: spotted bots only, squadmates always.
+  hud.drawMinimap(body.position, body.yaw, bots.bots, SITES, bomb.state.pos, mates.mates);
 
   // Scoreboard while Tab is held.
   if (input.state.keys.has('Tab') && (game.phase === 'live' || game.phase === 'buy')) {
     hud.showScoreboard([
       { name: 'YOU (Striker)', kills: game.kills, deaths: game.deaths, hp: Math.max(0, Math.round(game.hp)), money: `$${game.money}` },
+      ...mates.mates.map((m) => ({ name: `${m.name} (Striker)`, kills: m.kills, deaths: m.deaths, hp: m.alive ? m.hp : 0, money: '—' })),
       ...bots.bots.map((b) => ({ name: b.name, kills: b.kills, deaths: b.deaths, hp: b.alive ? b.hp : 0, money: '—' })),
     ]);
   } else hud.hideScoreboard();
@@ -584,6 +643,7 @@ window.__dustline = {
   getScore: () => game.scoreUs * 1000 + game.kills * 100,
   getHp: () => Math.round(game.hp),
   getEnemies: () => bots.bots.map((b) => ({ name: b.name, hp: b.hp, alive: b.alive, state: b.state })),
+  getSquad: () => mates.mates.map((m) => ({ name: m.name, hp: m.hp, alive: m.alive, state: m.state })),
   getPlayer: () => ({ x: body.position.x, z: body.position.z, yaw: body.yaw, hp: game.hp }),
   getBestScore: () => game.best,
   getBomb: () => ({ planted: bomb.state.planted, fuse: bomb.state.fuse, site: bomb.state.site }),
@@ -600,5 +660,6 @@ hud.setHealth(game.hp);
 hud.setMoney(game.money);
 hud.setRound(0, 0, 1);
 hud.setAlive(5);
+hud.setSquad(5);
 if (shot) runShot(shot);
 else requestAnimationFrame(frame);

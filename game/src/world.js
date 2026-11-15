@@ -15,9 +15,9 @@ export const WALLS = [
 ];
 // Low crates (block movement, not sight over the top). [x, z, w, h, d]
 export const CRATES = [
-  [-10, -13, 2.2, 1.1, 2.2], [-10, 13, 2.2, 1.1, 2.2], [10, -13, 2.2, 1.1, 2.2], [10, 13, 2.2, 1.1, 2.2],
-  [-3, -5, 1.6, 0.9, 1.6], [3, 5, 1.6, 0.9, 1.6], [-17, -12, 1.6, 0.9, 1.6], [17, 12, 1.6, 0.9, 1.6],
-  [-17, 12, 1.6, 0.9, 1.6], [17, -12, 1.6, 0.9, 1.6], [-4, -15, 1.6, 0.9, 1.6], [4, 15, 1.6, 0.9, 1.6],
+  [-12, -11, 2.2, 1.1, 2.2], [-10, 13, 2.2, 1.1, 2.2], [12, -11, 2.2, 1.1, 2.2], [12, 15.5, 2.2, 1.1, 2.2],
+  [-3, -3, 1.6, 0.9, 1.6], [3, 3, 1.6, 0.9, 1.6], [-19, -10, 1.6, 0.9, 1.6], [19, 10, 1.6, 0.9, 1.6],
+  [-17, 12, 1.6, 0.9, 1.6], [17, -12, 1.6, 0.9, 1.6], [-5, -16, 1.6, 0.9, 1.6], [5, 16, 1.6, 0.9, 1.6],
 ];
 export const SITES = {
   A: { x: -18, z: -13, r: 3.4 },
@@ -29,18 +29,27 @@ export const SPAWNS = {
     { x: -18, z: -15 }, { x: -8, z: -14 }, { x: 18, z: -13 }, { x: 8, z: -14 }, { x: 0, z: -15 },
   ],
 };
-// Waypoint graph for bot navigation (nodes + links).
+// Waypoint graph for bot navigation (nodes + links). Every link was audited against
+// the tall walls with the same segment test LOS uses: no link crosses a wall, and no
+// node sits on a wall edge or inside a crate, so a bot walking node to node never has
+// to push through solid geometry. Through-lanes run at x = ±8 (the z = ±11 walls
+// block the centre column there); the centre column is open between z = -10 and 10.
 export const WAYPOINTS = [
-  [0, 15], [0, 8], [0, 0], [0, -8], [0, -15],
-  [-10, 8], [-10, 0], [-10, -8], [-18, -13], [-18, 0], [-18, 13],
-  [10, 8], [10, 0], [10, -8], [18, 13], [18, 0], [18, -13],
-  [-4, 13], [4, -13],
+  [0, 15], [-8, 14], [8, 14],           // 0-2 south pocket (player spawn)
+  [-8, 6], [8, 6], [0, 6],              // 3-5 mid south
+  [-8, -6], [8, -6], [0, -6],           // 6-8 mid north
+  [0, -15], [-8, -14], [8, -14],        // 9-11 north pocket (bot spawn)
+  [-16, -13], [-16, 0], [-13, 0],       // 12-14 site A + west lane
+  [16, 13], [16, 0], [13, 0],           // 15-17 site B + east lane
+  [0, 0],                               // 18 mid door
 ];
 const LINKS = [
-  [0, 1], [1, 2], [2, 3], [3, 4], [1, 5], [2, 6], [3, 7], [5, 6], [6, 7],
-  [7, 8], [5, 9], [6, 9], [9, 10], [10, 17], [1, 11], [2, 12], [3, 13],
-  [11, 12], [12, 13], [13, 14], [11, 15], [12, 15], [15, 16], [14, 16],
-  [0, 17], [4, 18], [17, 5], [18, 13], [9, 8], [15, 14],
+  [0, 1], [0, 2], [1, 3], [2, 4], [2, 15],
+  [3, 5], [4, 5], [5, 18], [18, 8],
+  [3, 6], [4, 7], [6, 8], [7, 8],
+  [6, 10], [7, 11], [10, 9], [11, 9], [10, 12],
+  [13, 14], [14, 3], [14, 6], [13, 6],
+  [16, 17], [17, 4], [17, 7], [16, 7],
 ];
 
 export function losBlocked(ax, az, bx, bz) {

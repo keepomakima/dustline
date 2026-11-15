@@ -42,7 +42,7 @@ export function createBots(scene, colliders, random) {
       id: i + 1, name: `WARDEN ${i + 1}`, group, torso, head, legL, legR,
       body, move, hp: 100, alive: true, state: 'patrol',
       waypoint: Math.floor(random() * WAYPOINTS.length),
-      path: [], pathIndex: 0, lastKnown: null, loseTimer: 0,
+      path: [], pathIndex: 0, target: null, lastKnown: null, loseTimer: 0,
       burstLeft: 0, burstTimer: 0, pauseTimer: 0.4 + random() * 0.6,
       strafeDir: random() > 0.5 ? 1 : -1, strafeTimer: 0,
       stuckTimer: 0, lastPos: new THREE.Vector3(spawn.x, 0, spawn.z),
@@ -54,19 +54,23 @@ export function createBots(scene, colliders, random) {
     bots.push(bot);
   }
 
+  // Perception: the nearest living target (the player or a squadmate) inside the
+  // view distance and view cone with a clear line of sight. Returns {dist, target}
+  // where target is {pos, isPlayer, ref}, or null.
   function canSee(bot, ctx) {
-    if (!ctx.playerAlive) return 0;
-    const dx = ctx.playerPos.x - bot.body.position.x;
-    const dz = ctx.playerPos.z - bot.body.position.z;
-    const dist = Math.hypot(dx, dz);
-    if (dist > VIEW_DIST) return 0;
-    const eyeY = ctx.playerPos.y + 1.4;
-    const dy = eyeY - (bot.body.position.y + 1.5);
-    if (losBlocked(bot.body.position.x, bot.body.position.z, ctx.playerPos.x, ctx.playerPos.z)) return 0;
-    const fx = -Math.sin(bot.body.yaw); const fz = -Math.cos(bot.body.yaw);
-    const dot = (dx * fx + dz * fz) / (dist || 1);
-    if (dot < VIEW_COS && dist > 4) return 0;
-    return dist;
+    let best = null; let bestDist = Infinity;
+    for (const t of ctx.targets) {
+      if (!t.alive) continue;
+      const dx = t.pos.x - bot.body.position.x;
+      const dz = t.pos.z - bot.body.position.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > VIEW_DIST || dist >= bestDist) continue;
+      if (losBlocked(bot.body.position.x, bot.body.position.z, t.pos.x, t.pos.z)) continue;
+      const fx = -Math.sin(bot.body.yaw); const fz = -Math.cos(bot.body.yaw);
+      if (dist > 4 && (dx * fx + dz * fz) / (dist || 1) < VIEW_COS) continue;
+      best = t; bestDist = dist;
+    }
+    return best ? { dist: bestDist, target: best } : null;
   }
 
   function setPath(bot, target) {
@@ -77,10 +81,13 @@ export function createBots(scene, colliders, random) {
   function stepBot(bot, dt, ctx) {
     if (!bot.alive) return;
     const pos = bot.body.position;
-    const dist = canSee(bot, ctx);
+    const seen = canSee(bot, ctx);
+    const dist = seen ? seen.dist : 0;
     const prevState = bot.state;
-    if (dist > 0) { bot.state = 'engage'; bot.lastKnown = { x: ctx.playerPos.x, z: ctx.playerPos.z }; bot.loseTimer = 0; }
-    else if (bot.state === 'engage') {
+    if (seen) {
+      bot.state = 'engage'; bot.target = seen.target;
+      bot.lastKnown = { x: seen.target.pos.x, z: seen.target.pos.z }; bot.loseTimer = 0;
+    } else if (bot.state === 'engage') {
       bot.loseTimer += dt;
       bot.state = bot.loseTimer > 2.5 ? 'hunt' : 'engage';
       if (bot.state === 'hunt' && bot.lastKnown) setPath(bot, bot.lastKnown);
@@ -108,11 +115,12 @@ export function createBots(scene, colliders, random) {
 
     // Movement target.
     let target = null;
-    if (bot.state === 'engage') {
+    const engagePos = bot.target && bot.target.alive ? bot.target.pos : null;
+    if (bot.state === 'engage' && engagePos) {
       // Strafe sideways at 6-14 m, close in if far.
       bot.strafeTimer -= dt;
       if (bot.strafeTimer <= 0) { bot.strafeDir *= -1; bot.strafeTimer = 0.8 + random() * 1.2; }
-      const dx = ctx.playerPos.x - pos.x; const dz = ctx.playerPos.z - pos.z;
+      const dx = engagePos.x - pos.x; const dz = engagePos.z - pos.z;
       const len = Math.hypot(dx, dz) || 1;
       const px = -dz / len * bot.strafeDir; const pz = dx / len * bot.strafeDir;
       const toward = dist > 14 ? 0.8 : dist < 6 ? -0.5 : 0;
@@ -120,7 +128,11 @@ export function createBots(scene, colliders, random) {
       bot.body.yaw = Math.atan2(-dx, -dz);
     } else if (bot.path.length && bot.pathIndex < bot.path.length) {
       target = bot.path[bot.pathIndex];
-      if (Math.hypot(target.x - pos.x, target.z - pos.z) < 0.9) { bot.pathIndex += 1; target = bot.path[bot.pathIndex] || null; }
+      if (Math.hypot(target.x - pos.x, target.z - pos.z) < 0.9) { bot.pathIndex += 1; bot.nodeTimer = 0; target = bot.path[bot.pathIndex] || null; }
+      // A node that cannot be reached in 4 s (a crate nudged into the way, a
+      // corner) is skipped rather than pushed against forever.
+      bot.nodeTimer = (bot.nodeTimer || 0) + dt;
+      if (bot.nodeTimer > 4) { bot.pathIndex += 1; bot.nodeTimer = 0; target = bot.path[bot.pathIndex] || null; }
       if (target) bot.body.yaw = Math.atan2(-(target.x - pos.x), -(target.z - pos.z));
     }
     if (target) {
@@ -139,15 +151,19 @@ export function createBots(scene, colliders, random) {
       bot.lastPos.copy(pos); bot.stuckTimer = 0;
     }
     // Burst fire while engaging.
-    if (bot.state === 'engage' && dist > 0) {
+    if (bot.state === 'engage' && dist > 0 && bot.target && bot.target.alive) {
       bot.pauseTimer -= dt;
       if (bot.burstLeft > 0) {
         bot.burstTimer -= dt;
         if (bot.burstTimer <= 0) {
           bot.burstLeft -= 1; bot.burstTimer = BURST_GAP;
           ctx.onBotShot(bot);
-          const chance = Math.max(0.08, Math.min(0.6, 0.55 - dist * 0.008 - ctx.playerSpeed * 0.02));
-          if (random() < chance) ctx.onDamagePlayer(9 + random() * 7, bot);
+          const targetSpeed = bot.target.isPlayer ? ctx.playerSpeed : 3.6;
+          const chance = Math.max(0.08, Math.min(0.6, 0.55 - dist * 0.008 - targetSpeed * 0.02));
+          if (random() < chance) {
+            if (bot.target.isPlayer) ctx.onDamagePlayer(9 + random() * 7, bot);
+            else ctx.onDamageMate(bot.target.ref, 9 + random() * 7, bot);
+          }
         }
       } else if (bot.pauseTimer <= 0) {
         bot.burstLeft = BURST; bot.burstTimer = 0; bot.pauseTimer = BURST_PAUSE + random() * 0.5;
@@ -190,7 +206,7 @@ export function createBots(scene, colliders, random) {
       for (let i = 0; i < bots.length; i += 1) {
         const b = bots[i]; const s = SPAWNS.bots[i];
         b.body.position.set(s.x, 0, s.z); b.body.velocity.set(0, 0, 0);
-        b.hp = 100; b.alive = true; b.state = 'patrol';
+        b.hp = 100; b.alive = true; b.state = 'patrol'; b.target = null;
         b.waypoint = Math.floor(random() * WAYPOINTS.length);
         b.path = []; b.defuseProgress = 0; b.burstLeft = 0;
         b.group.rotation.set(0, 0, 0); b.group.position.set(s.x, 0, s.z);

@@ -4,7 +4,7 @@
 import { WEAPONS, GRENADE } from './weapons.js';
 
 const COPY = {
-  start: { title: 'DUSTLINE — Yard 7', copy: 'Five WARDENs hold the yard. Plant the bomb at Site A or B, or eliminate them all. First to 4 rounds.', action: 'Click to play' },
+  start: { title: 'DUSTLINE — Yard 7', copy: 'Five WARDENs hold the yard. You and four STRIKER squadmates plant the bomb at Site A or B, or eliminate them all. First to 7 rounds.', action: 'Click to play' },
   paused: { title: 'DUSTLINE', copy: 'Paused. Click to resume.', action: 'Click to resume' },
   end: { title: 'Match over', copy: '', action: 'Play again' },
 };
@@ -21,7 +21,7 @@ export function createHud() {
     buy: $('buy-menu'), buyList: $('buy-list'), buyMoney: $('buy-money'), deploy: $('deploy'),
     scoreboard: $('scoreboard'), scoreRows: $('score-rows'),
     minimap: $('minimap'), vignette: $('vignette'), weaponName: $('weapon-name'),
-    grenades: $('grenade-count'),
+    grenades: $('grenade-count'), squad: $('squad-value'),
   };
   const mapCtx = els.minimap.getContext('2d');
   let last = {};
@@ -48,6 +48,7 @@ export function createHud() {
     },
     setRound(us, them, round) { setText(els.round, 'round', `R${round} · ${us}–${them}`); },
     setAlive(n) { setText(els.alive, 'alive', `WARDENS LEFT ${n}`); },
+    setSquad(n) { setText(els.squad, 'squad', `SQUAD ${n}`); },
     setBomb(text) { setText(els.bomb, 'bomb', text); },
     feed(text) {
       const div = document.createElement('div');
@@ -116,7 +117,7 @@ export function createHud() {
         `<tr><td>${r.name}</td><td>${r.kills}</td><td>${r.deaths}</td><td>${r.hp}</td><td>${r.money}</td></tr>`).join('');
     },
     hideScoreboard() { els.scoreboard.hidden = true; },
-    drawMinimap(playerPos, yaw, bots, sites, bombPos) {
+    drawMinimap(playerPos, yaw, bots, sites, bombPos, mates = []) {
       const c = mapCtx; const S = 132;
       c.clearRect(0, 0, S, S);
       c.fillStyle = 'rgba(20,22,26,0.85)'; c.fillRect(0, 0, S, S);
@@ -135,6 +136,11 @@ export function createHud() {
         if (!b.alive || !b.spotted) continue;
         const [mx, my] = toMap(b.body.position.x, b.body.position.z);
         c.fillStyle = '#c8452c'; c.beginPath(); c.arc(mx, my, 3.5, 0, Math.PI * 2); c.fill();
+      }
+      for (const m of mates) {
+        if (!m.alive) continue;
+        const [mx, my] = toMap(m.body.position.x, m.body.position.z);
+        c.fillStyle = '#efe8d8'; c.beginPath(); c.arc(mx, my, 3, 0, Math.PI * 2); c.fill();
       }
       const [px, py] = toMap(playerPos.x, playerPos.z);
       c.fillStyle = '#efe8d8';
