@@ -651,7 +651,7 @@ window.__dustline = {
   getScore: () => game.scoreUs * 1000 + game.kills * 100,
   getHp: () => Math.round(game.hp),
   getEnemies: () => bots.bots.map((b) => ({ name: b.name, hp: b.hp, alive: b.alive, state: b.state })),
-  getSquad: () => mates.mates.map((m) => ({ name: m.name, hp: m.hp, alive: m.alive, state: m.state })),
+  getSquad: () => mates.mates.map((m) => ({ name: m.name, hp: m.hp, alive: m.alive, state: m.state, x: m.body.position.x, z: m.body.position.z, role: m.role, holdSite: m.holdSite })),
   getPlayer: () => ({ x: body.position.x, z: body.position.z, yaw: body.yaw, hp: game.hp }),
   getBestScore: () => game.best,
   getBomb: () => ({ planted: bomb.state.planted, fuse: bomb.state.fuse, site: bomb.state.site }),
