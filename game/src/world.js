@@ -17,7 +17,7 @@ export const WALLS = [
 export const CRATES = [
   [-10, -13, 2.2, 1.1, 2.2], [-10, 13, 2.2, 1.1, 2.2], [10, -13, 2.2, 1.1, 2.2], [10, 13, 2.2, 1.1, 2.2],
   [-3, -5, 1.6, 0.9, 1.6], [3, 5, 1.6, 0.9, 1.6], [-17, -12, 1.6, 0.9, 1.6], [17, 12, 1.6, 0.9, 1.6],
-  [-17, 12, 1.6, 0.9, 1.6], [17, -12, 1.6, 0.9, 1.6], [0, -15, 3, 0.7, 1.2], [0, 15, 3, 0.7, 1.2],
+  [-17, 12, 1.6, 0.9, 1.6], [17, -12, 1.6, 0.9, 1.6], [-4, -15, 1.6, 0.9, 1.6], [4, 15, 1.6, 0.9, 1.6],
 ];
 export const SITES = {
   A: { x: -18, z: -13, r: 3.4 },
@@ -26,7 +26,7 @@ export const SITES = {
 export const SPAWNS = {
   player: { x: 0, z: 15.5, yaw: 0 },
   bots: [
-    { x: -18, z: -15 }, { x: -8, z: -14 }, { x: 18, z: 15 }, { x: 8, z: 14 }, { x: 0, z: -15 },
+    { x: -18, z: -15 }, { x: -8, z: -14 }, { x: 18, z: -13 }, { x: 8, z: -14 }, { x: 0, z: -15 },
   ],
 };
 // Waypoint graph for bot navigation (nodes + links).
@@ -144,8 +144,8 @@ export function createWorld(scene) {
     group.add(letter);
   }
   // Dusk sky: warm key low from the west, cool fill, hemisphere gradient.
-  scene.add(new THREE.HemisphereLight(new THREE.Color('#8a7a5c'), new THREE.Color(PALETTE.canvas), 1.0));
-  const key = new THREE.DirectionalLight(new THREE.Color('#ffd9a0'), 2.2);
+  scene.add(new THREE.HemisphereLight(new THREE.Color('#8a7a5c'), new THREE.Color(PALETTE.canvas), 1.6));
+  const key = new THREE.DirectionalLight(new THREE.Color('#ffd9a0'), 2.6);
   key.position.set(-14, 16, 10); key.target.position.set(0, 0, 0);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
@@ -153,7 +153,7 @@ export function createWorld(scene) {
   key.shadow.camera.top = 20; key.shadow.camera.bottom = -20;
   key.shadow.camera.far = 60; key.shadow.bias = -0.0006;
   scene.add(key, key.target);
-  const fill = new THREE.DirectionalLight(new THREE.Color(PALETTE.muted), 0.5);
+  const fill = new THREE.DirectionalLight(new THREE.Color(PALETTE.muted), 0.9);
   fill.position.set(12, 10, -12);
   scene.add(fill);
   return { colliders, shootables, group };

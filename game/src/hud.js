@@ -14,7 +14,7 @@ export function createHud() {
   const els = {
     overlay: $('overlay'), title: $('overlay-title'), copy: $('overlay-copy'), play: $('play'),
     ammo: $('ammo'), mag: $('ammo-mag'), reserve: $('ammo-reserve'),
-    health: $('health-value'), healthBar: $('health-bar'), money: $('money-value'),
+    health: $('health-value'), healthBar: $('health-bar'), money: $('money'),
     timer: $('timer-value'), round: $('round-value'), alive: $('alive-value'),
     feed: $('killfeed'), banner: $('banner'), bomb: $('bomb-status'),
     plant: $('plant-bar'), plantFill: $('plant-fill'), plantLabel: $('plant-label'),

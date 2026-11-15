@@ -6,7 +6,7 @@
 // frame for a capture, renders it twice, then freezes it and sets window.__shotReady.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
-import { createWorld, SITES, SPAWNS } from './world.js';
+import { createWorld, SITES, SPAWNS, losBlocked } from './world.js';
 import { createInput } from './input.js';
 import { createPlayer } from './player.js';
 import { createWeapons, WEAPONS, GRENADE } from './weapons.js';
@@ -526,7 +526,8 @@ function runShot(name) {
     // Walk a little forward, then engage the nearest bot.
     body.position.set(0, 0, 8);
     settle(30);
-    const bot = bots.bots.find((b) => b.alive);
+    const bot = bots.bots.find((b) => b.alive && !losBlocked(body.position.x, body.position.z, b.body.position.x, b.body.position.z))
+      ?? bots.bots.find((b) => b.alive);
     if (bot) {
       aimAt(new THREE.Vector3(bot.body.position.x, 1.35, bot.body.position.z));
       for (let r = 0; r < 3; r += 1) { shoot(0); settle(8); }
@@ -586,6 +587,10 @@ window.__dustline = {
   getPlayer: () => ({ x: body.position.x, z: body.position.z, yaw: body.yaw, hp: game.hp }),
   getBestScore: () => game.best,
   getBomb: () => ({ planted: bomb.state.planted, fuse: bomb.state.fuse, site: bomb.state.site }),
+  teleport(x, z, yaw = 0) {
+    body.position.set(x, 0, z); body.velocity.set(0, 0, 0); body.yaw = yaw; body.pitch = 0;
+    return { x: body.position.x, z: body.position.z };
+  },
 };
 if (testMode) window.__gameTest = window.__dustline;
 
