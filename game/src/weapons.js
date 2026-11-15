@@ -31,7 +31,8 @@ export function createWeapons(camera) {
     else if (kind === 'dmr') { add(0.08, 0.1, 0.5, 0, 0, -0.16); add(0.03, 0.06, 0.1, 0, 0.07, -0.1, dark); add(0.07, 0.08, 0.22, 0, -0.02, 0.28, grip); }
     else if (kind === 'grenade') { const s = new THREE.Mesh(new THREE.SphereGeometry(0.06, 12, 10), dark); s.position.set(0, 0, -0.1); g.add(s); }
     else { add(0.09, 0.1, 0.42, 0, 0, -0.14); add(0.045, 0.045, 0.4, 0, 0.025, -0.38, grip); add(0.075, 0.08, 0.22, 0, -0.02, 0.3, grip); }
-    g.position.set(0.22, -0.22, -0.55);
+    g.position.set(0.26, -0.26, -0.5);
+    g.scale.setScalar(0.62);
     return g;
   }
 
@@ -43,10 +44,10 @@ export function createWeapons(camera) {
   }
   const flash = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.24),
     new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.accent), transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
-  flash.position.set(0.22, -0.2, -1.05); flash.visible = false;
+  flash.position.set(0.26, -0.24, -0.95); flash.visible = false;
   camera.add(flash);
   const flashLight = new THREE.PointLight(new THREE.Color(PALETTE.accent), 0, 5);
-  flashLight.position.set(0.24, -0.16, -0.6);
+  flashLight.position.set(0.26, -0.2, -0.55);
   camera.add(flashLight);
   const torch = new THREE.SpotLight(new THREE.Color('#ffd9a0'), 0, 26, 0.5, 0.45, 1.2);
   torch.position.set(0, 0, 0);
@@ -122,11 +123,11 @@ export function createWeapons(camera) {
       state.bobPhase += dt * (2 + speed * 1.6);
       const bob = Math.min(1, speed / 5.2) * 0.012;
       const m = models[state.current];
-      const aimX = state.aiming ? 0 : 0.22;
-      const aimY = state.aiming ? -0.17 : -0.22;
+      const aimX = state.aiming ? 0 : 0.26;
+      const aimY = state.aiming ? -0.19 : -0.26;
       m.position.x += (aimX - m.position.x) * Math.min(1, dt * 14);
       m.position.y = aimY + Math.sin(state.bobPhase * 2) * bob;
-      m.position.z = -0.55 + state.kick;
+      m.position.z = -0.5 + state.kick;
       m.rotation.x = state.kick * 2.2;
       if (state.reloadLeft > 0) {
         state.reloadLeft = Math.max(0, state.reloadLeft - dt);

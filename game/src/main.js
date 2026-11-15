@@ -419,8 +419,9 @@ function step(dt) {
     }
   }
 
-  // Bots.
-  if (live || game.phase === 'roundEnd') {
+  // Bots. In ?shot= captures the AI holds still, so the staged frame is
+  // deterministic (the starter does the same with its targets).
+  if (!shot && (live || game.phase === 'roundEnd')) {
     const targets = [
       { pos: body.position, alive: game.playerAlive, isPlayer: true, ref: null },
       ...mates.mates.map((m) => ({ pos: m.body.position, alive: m.alive, isPlayer: false, ref: m })),
@@ -582,18 +583,23 @@ function runShot(name) {
     game.phase = 'live'; game.phaseTime = ROUND_SECONDS;
     resetRoundPositions();
     settle(20);
-    // Walk a little forward, then engage the nearest bot.
+    // Walk a little forward, then engage a WARDEN staged in the open mid lane
+    // (the AI holds still in ?shot= captures, so the frame is deterministic).
+    // Aim and shoot at once; let the muzzle flash fade before the capture.
     body.position.set(0, 0, 8);
-    settle(30);
-    const bot = bots.bots.find((b) => b.alive && !losBlocked(body.position.x, body.position.z, b.body.position.x, b.body.position.z))
-      ?? bots.bots.find((b) => b.alive);
+    const staged = bots.bots[0];
+    staged.body.position.set(-4, 0, -6);
+    staged.body.yaw = Math.atan2(-4, -14);
+    staged.group.position.set(-4, 0, -6);
+    staged.group.rotation.y = staged.body.yaw;
+    const bot = staged;
     if (bot) {
       aimAt(new THREE.Vector3(bot.body.position.x, 1.35, bot.body.position.z));
       for (let r = 0; r < 3; r += 1) { shoot(0); settle(8); }
       settle(12);
       aimAt(new THREE.Vector3(bot.body.position.x, 1.1, bot.body.position.z));
       shoot(0);
-      settle(1);
+      settle(6);
     }
     if (name === 'end') {
       game.scoreUs = 3; game.scoreThem = 2; game.round = 6;
