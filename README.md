@@ -22,13 +22,14 @@ No build step, no network at runtime: static ES modules, vendored Three.js 0.187
 - **Arsenal:** P9 pistol, VK-9 SMG, AR-7 rifle, SG-12 shotgun, DMR-8 marksman rifle, plus frag grenades (arc, bounce, blast falloff). Aim-down-sights (RMB: FOV 74→55, spread ×0.45), sprint, crouch, jump, flashlight, walk bob, recoil kick, muzzle flash, tracers and impact puffs.
 - **Objective:** hold E for 3 s inside a site to plant; a 35 s fuse follows. A living WARDEN that reaches the bomb defuses it in 5 s.
 - **Squad:** four AI STRIKER squadmates (VEX, ORIN, KESTREL, BRAM) fight beside you — 5v5, with a team plan: VEX and ORIN follow you, KESTREL holds Site A and BRAM holds Site B, and when the bomb is planted the whole squad converges to defend it. They call out contacts ("Contact! — Site A"), and keep fighting if you die: the camera spectates a living squadmate until the round resolves. Friendly fire is off.
-- **Bots:** five WARDENs with a finite-state brain — patrol waypoints, investigate gunfire, engage on line-of-sight inside a view cone, hunt the last known position, rush to defuse. They walk a BFS waypoint graph, strafe while firing in bursts with distance/speed-based hit chance, and recover when stuck. They see and shoot your squadmates too, not just you. A WARDEN that just spotted a target takes 0.6 s to aim before its first burst (reaction time), so crossing a doorway is not instantly lethal.
+- **Squad command (v4):** press Q to ping a push point — the squad converges on it for 12 s (a diamond on the minimap). If you die before planting, the bomb drops where you fell and the nearest living mate recovers it, pushes to the nearest site and plants it (same 3 s channel), so the round is still winnable without you.
+- **Bots:** five WARDENs with a finite-state brain — patrol waypoints, investigate gunfire, engage on line-of-sight inside a view cone, hunt the last known position, rush to defuse. They walk a BFS waypoint graph, strafe while firing in bursts with distance/speed-based hit chance, and recover when stuck. They see and shoot your squadmates too, not just you. A WARDEN that just spotted a target takes 1.0 s to aim before its first burst (reaction time), so crossing a doorway is not instantly lethal. v4 rebalance: WARDEN bursts are slower and softer (hit chance 0.42, 7–12 damage), squadmates hit harder and more often (0.72, 14–22 damage) — the striker side was losing the yard too often.
 - **HUD:** health, money, timer, round score, alive count, kill feed, bomb status, plant bar, buy menu with weapon stats, Tab scoreboard, minimap (spotted bots only), damage vignette and round banners.
 - **Feel:** fixed 60 Hz simulation, deterministic `?shot=` captures, `window.__dustline` playtest probe, synthesised footsteps / shots / reload / plant beeps (M mutes).
 
 ## Controls
 
-WASD move · Shift sprint · mouse look · click fire · RMB aim · R reload · 1–5 / wheel weapons · G grenade · E plant (hold) · F flashlight · B buy · Tab scoreboard · Ctrl crouch · Space jump · M mute.
+WASD move · Shift sprint · mouse look · click fire · RMB aim · R reload · 1–5 / wheel weapons · G grenade · E plant (hold) · Q ping squad push · F flashlight · B buy · Tab scoreboard · Ctrl crouch · Space jump · M mute.
 
 ---
 

@@ -14,7 +14,15 @@ const VIEW_DIST = 38;
 const VIEW_COS = Math.cos(1.15); // ~66 deg half-cone
 const BURST = 3;
 const BURST_GAP = 0.11;
-const BURST_PAUSE = 0.85;
+// v4 rebalance: WARDENs were too lethal — the striker side lost 5 of 12 judged
+// games. Longer pauses between bursts, a full second to aim after spotting a
+// target, and softer hits, so a crossing or a plant is a fight, not a shredding.
+const BURST_PAUSE = 1.15;
+const REACT_TIME = 1.0;
+const HIT_BASE = 0.42;
+const HIT_CAP = 0.45;
+const DMG_MIN = 7;
+const DMG_SPREAD = 5;
 
 export function createBots(scene, colliders, random) {
   const bodyMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.enemy), roughness: 0.7, metalness: 0.05 });
@@ -86,10 +94,10 @@ export function createBots(scene, colliders, random) {
     const prevState = bot.state;
     if (seen) {
       bot.state = 'engage'; bot.target = seen.target;
-      // Reaction time: a bot that just spotted a target takes 0.6 s to aim
+      // Reaction time: a bot that just spotted a target takes 1.0 s to aim
       // before its first burst, so a player (or scripted player) crossing a
       // doorway is not instantly shredded.
-      if (prevState !== 'engage') bot.aimTimer = 0.6;
+      if (prevState !== 'engage') bot.aimTimer = REACT_TIME;
       bot.lastKnown = { x: seen.target.pos.x, z: seen.target.pos.z }; bot.loseTimer = 0;
     } else if (bot.state === 'engage') {
       bot.loseTimer += dt;
@@ -165,10 +173,10 @@ export function createBots(scene, colliders, random) {
           bot.burstLeft -= 1; bot.burstTimer = BURST_GAP;
           ctx.onBotShot(bot);
           const targetSpeed = bot.target.isPlayer ? ctx.playerSpeed : 3.6;
-          const chance = Math.max(0.08, Math.min(0.6, 0.55 - dist * 0.008 - targetSpeed * 0.02));
+          const chance = Math.max(0.08, Math.min(HIT_CAP, HIT_BASE - dist * 0.008 - targetSpeed * 0.02));
           if (random() < chance) {
-            if (bot.target.isPlayer) ctx.onDamagePlayer(9 + random() * 7, bot);
-            else ctx.onDamageMate(bot.target.ref, 9 + random() * 7, bot);
+            if (bot.target.isPlayer) ctx.onDamagePlayer(DMG_MIN + random() * DMG_SPREAD, bot);
+            else ctx.onDamageMate(bot.target.ref, DMG_MIN + random() * DMG_SPREAD, bot);
           }
         }
       } else if (bot.pauseTimer <= 0) {

@@ -1,8 +1,10 @@
 // DUSTLINE boot and the one loop: a fixed 60 Hz simulation feeding a render at the
-// display's rate. Rounds: 15 s buy, 100 s live, first to 4 (max 7). Win a round by
+// display's rate. Rounds: 15 s buy, 100 s live, first to 7 (max 12). Win a round by
 // eliminating all five WARDENs or by planting the bomb and letting it blow; lose it by
 // dying, by the timer, or by a bot defusing the bomb. Kills pay $300, a round win
-// $3250, a loss $1900. ?shot=start|play|buy|end with &seed=N stages a deterministic
+// $3250, a loss $1900. v4: squad ping (Q) sends the squad to a point, a mate recovers
+// a dropped bomb and plants it, and WARDEN/mate lethality is rebalanced so the
+// striker side wins the yard more often. ?shot=start|play|buy|end with &seed=N stages a deterministic
 // frame for a capture, renders it twice, then freezes it and sets window.__shotReady.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
@@ -113,6 +115,9 @@ const game = {
   hp: 100, kills: 0, deaths: 0, shots: 0, hits: 0,
   phaseTime: 0, playerAlive: true, matchOver: false,
   best: 0,
+  bombDrop: null, // {x, z} where the bomb lies after the carrier went down
+  bombCarrier: null, // the mate assigned to recover it, or null
+  ping: null, // {x, z, until} squad push point from Q, or null
 };
 let elapsed = 0;
 let frozen = false;
@@ -124,6 +129,7 @@ let roundEndTimer = 0;
 let roundWinner = null;
 let shake = 0;
 let spectateMate = null;
+let matePlanting = null; // the mate channeling a plant this step, or null
 
 try { game.best = Number(localStorage.getItem('dustline-best') ?? 0) || 0; } catch { game.best = 0; }
 
@@ -150,9 +156,25 @@ function resetRoundPositions() {
   bots.reset();
   mates.reset();
   spectateMate = null;
+  matePlanting = null;
+  game.bombDrop = null; game.bombCarrier = null; game.ping = null;
   bomb.reset();
   grenades.forEach((g) => scene.remove(g.mesh));
   grenades.length = 0;
+}
+
+// The nearest living mate becomes the bomb carrier when the bomb is on the
+// ground; the squad only ever has one carrier at a time.
+function assignCarrier() {
+  const alive = mates.mates.filter((m) => m.alive);
+  if (!alive.length || !game.bombDrop) { game.bombCarrier = null; return; }
+  let best = alive[0]; let bestD = Infinity;
+  for (const m of alive) {
+    const d = Math.hypot(m.body.position.x - game.bombDrop.x, m.body.position.z - game.bombDrop.z);
+    if (d < bestD) { bestD = d; best = m; }
+  }
+  game.bombCarrier = best;
+  hud.feed(`${best.name} is recovering the bomb`);
 }
 
 function startBuyPhase() {
@@ -189,6 +211,7 @@ function endRound(winner, reason) {
   game.phase = 'roundEnd';
   roundWinner = winner;
   roundEndTimer = 3.5;
+  game.ping = null; game.bombDrop = null; game.bombCarrier = null; matePlanting = null;
   if (winner === 'us') {
     game.scoreUs += 1; game.money += 3250;
     hud.banner(`Round ${game.round} — STRIKERS win. ${reason}`);
@@ -282,6 +305,13 @@ function damagePlayer(amount, source) {
     hud.feed(`${source} eliminated you`);
     spectateMate = mates.mates.find((m) => m.alive) || null;
     if (spectateMate) hud.feed(`Spectating ${spectateMate.name} — the squad fights on.`);
+    // The bomb drops where the player fell; a living mate recovers it, so a
+    // death no longer hands the round to the defusers by default.
+    if (!bomb.state.planted && mates.aliveCount() > 0) {
+      game.bombDrop = { x: body.position.x, z: body.position.z };
+      assignCarrier();
+      hud.feed('Bomb dropped — a squadmate will recover it');
+    }
     if (!bomb.state.planted && mates.aliveCount() === 0) endRound('them', 'The squad was eliminated.');
     // If the bomb is planted, the round continues: bots must defuse or it blows.
     // If squadmates live, they can still clear the yard for the round win.
@@ -294,6 +324,16 @@ function damageMate(mate, amount, source) {
   hud.setSquad(1 + mates.aliveCount());
   if (died) {
     hud.feed(`${source} eliminated ${mate.name}`);
+    // A carrier that goes down drops the bomb where it fell; the next nearest
+    // living mate takes over the recovery, while the player still lives.
+    if (mate.carrying) {
+      mate.carrying = false; mate.planting = false; mate.plantProgress = 0;
+      if (!game.playerAlive && !bomb.state.planted) {
+        game.bombDrop = { x: mate.body.position.x, z: mate.body.position.z };
+        hud.feed(`${mate.name} dropped the bomb`);
+        assignCarrier();
+      }
+    }
     if (!game.playerAlive) spectateMate = mates.mates.find((m) => m.alive) || null;
     if (!game.playerAlive && mates.aliveCount() === 0 && !bomb.state.planted) {
       endRound('them', 'The squad was eliminated.');
@@ -436,10 +476,20 @@ function step(dt) {
       onBotShot: () => audio.enemyShot(),
       onDefuse: (bot, progress) => bomb.noteDefuse(bot, progress),
     });
+    matePlanting = null;
     mates.step(dt, {
       enemies: bots.bots,
       playerPos: body.position, playerYaw: body.yaw, playerAlive: game.playerAlive,
       bombPlanted: bomb.state.planted, bombPos: bomb.state.pos,
+      now: elapsed,
+      bombDrop: game.bombDrop, carrier: game.bombCarrier,
+      ping: game.ping,
+      onBombPickup: (mate) => {
+        mate.carrying = true;
+        game.bombDrop = null; game.bombCarrier = mate;
+        hud.feed(`${mate.name} picked up the bomb — pushing to plant`);
+      },
+      onMatePlant: (mate) => { matePlanting = mate; },
       onMateShot: (mate) => { audio.enemyShot(); bots.hear(mate.body.position.x, mate.body.position.z); },
       onDamageEnemy: (enemy, dmg, mate) => {
         const result = bots.damage(enemy.torso, dmg);
@@ -462,11 +512,21 @@ function step(dt) {
     }
   }
 
-  // Bomb: plant channel (hold E inside a site) and the fuse.
-  const planting = live && game.playerAlive && input.state.keys.has('KeyE') && !bomb.state.planted;
+  // Bomb: plant channel (hold E inside a site) and the fuse. The planter is the
+  // player, or the carrying mate channeling in a site after the player went down.
+  const playerPlanting = live && game.playerAlive && input.state.keys.has('KeyE') && !bomb.state.planted;
+  const matePlantingNow = live && matePlanting && matePlanting.alive && matePlanting.carrying && !bomb.state.planted;
+  const planting = playerPlanting || matePlantingNow;
+  const planterPos = matePlantingNow ? matePlanting.body.position : body.position;
+  const planterAlive = matePlantingNow ? matePlanting.alive : game.playerAlive;
   bomb.step(dt, {
-    planting, planterPos: body.position, playerAlive: game.playerAlive,
+    planting, planterPos, planterAlive,
     onPlant: (site) => {
+      if (matePlanting) {
+        matePlanting.carrying = false; matePlanting.planting = false; matePlanting.plantProgress = 0;
+        hud.feed(`${matePlanting.name} planted the bomb at Site ${site}`);
+        game.bombCarrier = null; matePlanting = null;
+      }
       hud.setBomb(`BOMB PLANTED at Site ${site} — defend it!`);
       hud.feed(`Bomb planted at Site ${site}`);
       audio.plant();
@@ -506,8 +566,8 @@ function step(dt) {
   for (const t of tracers) if (t.life > 0) { t.life -= dt; t.line.material.opacity = Math.max(0, t.life / 0.09) * 0.9; }
   for (const im of impacts) if (im.life > 0) { im.life -= dt; im.mesh.material.opacity = Math.max(0, im.life / 0.25) * 0.9; }
 
-  // Minimap: spotted bots only, squadmates always.
-  hud.drawMinimap(body.position, body.yaw, bots.bots, SITES, bomb.state.pos, mates.mates);
+  // Minimap: spotted bots only, squadmates always, ping marker when set.
+  hud.drawMinimap(body.position, body.yaw, bots.bots, SITES, bomb.state.pos, mates.mates, game.ping);
 
   // Scoreboard while Tab is held.
   if (input.state.keys.has('Tab') && (game.phase === 'live' || game.phase === 'buy')) {
@@ -533,6 +593,18 @@ function frame(now) {
     }
     if (input.pressed('KeyR') && game.phase === 'live') weapons.reload();
     if (input.pressed('KeyF') && game.phase === 'live') { weapons.state.torchOn = !weapons.state.torchOn; }
+    if (input.pressed('KeyQ') && game.phase === 'live' && game.playerAlive) {
+      // Squad ping: mark the crosshair's point in the world and send the squad
+      // there for 12 s; the minimap shows the ping until it expires.
+      camera.getWorldDirection(direction);
+      scene.updateMatrixWorld(true);
+      raycaster.set(camera.position, direction);
+      const hit = raycaster.intersectObjects(world.shootables, false)[0];
+      const px = hit ? hit.point.x : camera.position.x + direction.x * 30;
+      const pz = hit ? hit.point.z : camera.position.z + direction.z * 30;
+      game.ping = { x: px, z: pz, until: elapsed + 12 };
+      hud.feed(`Ping — squad pushing ${px < 0 ? 'Site A' : 'Site B'}`);
+    }
     if (input.pressed('KeyM')) { const m = audio.toggleMute(); hud.feed(m ? 'Sound muted' : 'Sound on'); }
     if (input.pressed('KeyB') && game.phase === 'live') { /* buy only in buy phase */ }
     if (input.pressed('Digit1')) weapons.select('pistol');
@@ -651,10 +723,10 @@ window.__dustline = {
   getScore: () => game.scoreUs * 1000 + game.kills * 100,
   getHp: () => Math.round(game.hp),
   getEnemies: () => bots.bots.map((b) => ({ name: b.name, hp: b.hp, alive: b.alive, state: b.state })),
-  getSquad: () => mates.mates.map((m) => ({ name: m.name, hp: m.hp, alive: m.alive, state: m.state, x: m.body.position.x, z: m.body.position.z, role: m.role, holdSite: m.holdSite })),
+  getSquad: () => mates.mates.map((m) => ({ name: m.name, hp: m.hp, alive: m.alive, state: m.state, x: m.body.position.x, z: m.body.position.z, role: m.role, holdSite: m.holdSite, carrying: m.carrying, planting: m.planting })),
   getPlayer: () => ({ x: body.position.x, z: body.position.z, yaw: body.yaw, hp: game.hp }),
   getBestScore: () => game.best,
-  getBomb: () => ({ planted: bomb.state.planted, fuse: bomb.state.fuse, site: bomb.state.site }),
+  getBomb: () => ({ planted: bomb.state.planted, fuse: bomb.state.fuse, site: bomb.state.site, drop: game.bombDrop, carrier: game.bombCarrier ? game.bombCarrier.name : null, ping: game.ping }),
   teleport(x, z, yaw = 0) {
     body.position.set(x, 0, z); body.velocity.set(0, 0, 0); body.yaw = yaw; body.pitch = 0;
     return { x: body.position.x, z: body.position.z };

@@ -4,17 +4,25 @@
 // are on the player's side (ink-coloured, never shot at by the player: friendly fire
 // is off) and they call out contacts. If the player dies, the round goes on with them
 // until the squad is wiped, the yard is cleared, or the bomb resolves.
+// v4: the squad can finish the job alone — a mate recovers a dropped bomb and plants
+// it, and the player can ping (Q) a push point the squad converges on.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 import { createBody } from './player.js';
-import { findPath, losBlocked, WAYPOINTS, SPAWNS } from './world.js';
+import { findPath, losBlocked, WAYPOINTS, SPAWNS, SITES } from './world.js';
 
 const MATE_SPEED = 3.6;
 const VIEW_DIST = 38;
 const VIEW_COS = Math.cos(1.15);
 const BURST = 3;
 const BURST_GAP = 0.11;
-const BURST_PAUSE = 0.9;
+// v4 buff: mates hit harder and more often, and shoot sooner between bursts —
+// the v3 squad still lost the yard too often when the player went down.
+const BURST_PAUSE = 0.7;
+const HIT_BASE = 0.72;
+const HIT_CAP = 0.78;
+const DMG_MIN = 14;
+const DMG_SPREAD = 8;
 export const CALLSIGNS = ['VEX', 'ORIN', 'KESTREL', 'BRAM'];
 // Team plan: VEX and ORIN follow the player; KESTREL holds Site A and BRAM
 // holds Site B, patrolling between the site's two waypoint nodes, so both
@@ -60,6 +68,7 @@ export function createTeammates(scene, colliders, random) {
       strafeDir: random() > 0.5 ? 1 : -1, strafeTimer: 0,
       stuckTimer: 0, lastPos: new THREE.Vector3(spawn.x, 0, spawn.z),
       walkPhase: random() * 6, kills: 0, deaths: 0, calledOut: false,
+      carrying: false, planting: false, plantProgress: 0,
     };
     torso.userData.mate = mate; torso.userData.part = 'torso';
     head.userData.mate = mate; head.userData.part = 'head';
@@ -94,6 +103,8 @@ export function createTeammates(scene, colliders, random) {
     const seen = nearestVisibleEnemy(mate, ctx);
     if (seen) {
       mate.target = seen.enemy; mate.state = 'engage'; mate.loseTimer = 0;
+      // Engaging breaks a plant channel, same as the player's plant cancelling.
+      mate.planting = false; mate.plantProgress = 0;
       if (!mate.calledOut) {
         mate.calledOut = true;
         ctx.onCallout(mate, CALLOUTS[Math.floor(random() * CALLOUTS.length)], seen.enemy);
@@ -115,6 +126,54 @@ export function createTeammates(scene, colliders, random) {
       const toward = dist > 14 ? 0.8 : dist < 6 ? -0.5 : 0;
       target = { x: pos.x + px + (dx / dist) * toward, z: pos.z + pz + (dz / dist) * toward };
       mate.body.yaw = Math.atan2(-dx, -dz);
+    } else if (mate.carrying && !ctx.bombPlanted) {
+      // Carrying the bomb: push to the nearest site and plant. The plant channel
+      // is reported to main.js, which drives the shared bomb state.
+      let site = null; let siteDist = Infinity;
+      for (const s of Object.values(SITES)) {
+        const d = Math.hypot(s.x - pos.x, s.z - pos.z);
+        if (d < siteDist) { siteDist = d; site = s; }
+      }
+      if (site && siteDist < site.r) {
+        mate.planting = true;
+        mate.plantProgress += dt;
+        if (ctx.onMatePlant) ctx.onMatePlant(mate, mate.plantProgress);
+        mate.body.yaw += dt * 0.6;
+      } else if (site) {
+        mate.planting = false; mate.plantProgress = 0;
+        if (!mate.path.length || mate.pathIndex >= mate.path.length) setPath(mate, { x: site.x, z: site.z });
+        target = mate.path[mate.pathIndex] || null;
+        if (target && Math.hypot(target.x - pos.x, target.z - pos.z) < 0.9) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        mate.nodeTimer = (mate.nodeTimer || 0) + dt;
+        if (mate.nodeTimer > 4) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        if (target) mate.body.yaw = Math.atan2(-(target.x - pos.x), -(target.z - pos.z));
+      }
+    } else if (ctx.bombDrop && ctx.carrier === mate && !ctx.bombPlanted) {
+      // The designated carrier recovers the dropped bomb; pickup within 1.5 m.
+      const d = Math.hypot(ctx.bombDrop.x - pos.x, ctx.bombDrop.z - pos.z);
+      if (d < 1.5) {
+        if (ctx.onBombPickup) ctx.onBombPickup(mate);
+      } else {
+        if (!mate.path.length || mate.pathIndex >= mate.path.length) setPath(mate, ctx.bombDrop);
+        target = mate.path[mate.pathIndex] || null;
+        if (target && Math.hypot(target.x - pos.x, target.z - pos.z) < 0.9) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        mate.nodeTimer = (mate.nodeTimer || 0) + dt;
+        if (mate.nodeTimer > 4) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        if (target) mate.body.yaw = Math.atan2(-(target.x - pos.x), -(target.z - pos.z));
+      }
+    } else if (ctx.ping && ctx.now < ctx.ping.until && !ctx.bombPlanted) {
+      // Squad ping (Q): converge on the pinged point for 12 s, then resume.
+      const d = Math.hypot(ctx.ping.x - pos.x, ctx.ping.z - pos.z);
+      if (d > 3) {
+        if (!mate.path.length || mate.pathIndex >= mate.path.length) setPath(mate, { x: ctx.ping.x, z: ctx.ping.z });
+        target = mate.path[mate.pathIndex] || null;
+        if (target && Math.hypot(target.x - pos.x, target.z - pos.z) < 0.9) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        mate.nodeTimer = (mate.nodeTimer || 0) + dt;
+        if (mate.nodeTimer > 4) { mate.pathIndex += 1; mate.nodeTimer = 0; target = mate.path[mate.pathIndex] || null; }
+        if (target) mate.body.yaw = Math.atan2(-(target.x - pos.x), -(target.z - pos.z));
+      } else {
+        mate.body.yaw += dt * 0.6; // hold the ping, scanning
+      }
     } else if (ctx.bombPlanted && ctx.bombPos) {
       // Bomb down: converge on the planted site and defend it — a plant the
       // squad ignores is a round handed to the defusers.
@@ -194,8 +253,8 @@ export function createTeammates(scene, colliders, random) {
         if (mate.burstTimer <= 0) {
           mate.burstLeft -= 1; mate.burstTimer = BURST_GAP;
           ctx.onMateShot(mate);
-          const chance = Math.max(0.12, Math.min(0.65, 0.62 - seen.dist * 0.008));
-          if (random() < chance) ctx.onDamageEnemy(mate.target, 12 + random() * 8, mate);
+          const chance = Math.max(0.12, Math.min(HIT_CAP, HIT_BASE - seen.dist * 0.008));
+          if (random() < chance) ctx.onDamageEnemy(mate.target, DMG_MIN + random() * DMG_SPREAD, mate);
         }
       } else if (mate.pauseTimer <= 0) {
         mate.burstLeft = BURST; mate.burstTimer = 0; mate.pauseTimer = BURST_PAUSE + random() * 0.5;
@@ -226,6 +285,7 @@ export function createTeammates(scene, colliders, random) {
         m.body.position.set(s.x, 0, s.z); m.body.velocity.set(0, 0, 0);
         m.hp = 100; m.alive = true; m.state = 'follow'; m.holdNode = 0;
         m.path = []; m.target = null; m.burstLeft = 0;
+        m.carrying = false; m.planting = false; m.plantProgress = 0;
         m.group.rotation.set(0, 0, 0); m.group.position.set(s.x, 0, s.z);
       }
     },

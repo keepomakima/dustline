@@ -32,9 +32,11 @@ export function createBomb(scene) {
       return null;
     },
     step(dt, ctx) {
-      // ctx: {planting, planterPos, playerAlive, onPlant, onExplode, onDefuse, beep}
+      // ctx: {planting, planterPos, planterAlive, onPlant, onExplode, onDefuse, beep}
+      // The planter is the player (hold E in a site) or, in v4, a squadmate
+      // carrying the bomb after the player went down — same channel, same fuse.
       if (!state.planted) {
-        if (ctx.planting && ctx.playerAlive) {
+        if (ctx.planting && ctx.planterAlive) {
           const site = this.siteAt(ctx.planterPos.x, ctx.planterPos.z);
           if (site) {
             state.plantProgress += dt;
